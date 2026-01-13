@@ -1,142 +1,102 @@
-// This file acts as the backend server.
-// It proxies requests to the DAA API and handles authentication headers.
+import express from 'express';
+import cors from 'cors';
+import morgan from 'morgan';
+import dotenv from 'dotenv';
+import axios from 'axios';
+import cron from 'node-cron';
 
-require('dotenv').config();
-const express = require('express');
-const axios = require('axios');
-const cors = require('cors');
-const morgan = require('morgan');
+dotenv.config(); // загружаем .env
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware Setup
-// Enable CORS to allow requests from the React frontend (running on different port/domain)
-app.use(cors());
-
-// Log requests to the console for debugging
+// Логируем все запросы — видно, кто и когда пришёл
 app.use(morgan('dev'));
 
-// Parse JSON bodies (if needed for future POST requests)
+// Разрешаем фронту с любого домена стучаться
+app.use(cors());
+
+// Читаем JSON, если кто-то пришлёт
 app.use(express.json());
 
-// --- Configuration ---
-// Base URL for the DAA Operational API
-const API_BASE_URL = 'https://api.daa.ie/dub/aops/flightdata/operational/v1';
-// List of carriers we are interested in
-const CARRIERS = 'EI,BA,IB,VY,I2,AA,T2';
-
-/**
- * Helper function to retrieve API headers from environment variables.
- * Throws an error if keys are missing.
- */
-const getHeaders = () => {
-    const appId = process.env.APP_ID;
-    const appKey = process.env.APP_KEY;
-    
-    if (!appId || !appKey) {
-        console.error('Missing APP_ID or APP_KEY in .env file');
-        throw new Error('Server misconfiguration: Missing API Credentials');
-    }
-
-    return {
-        'app_id': appId,
-        'app_key': appKey,
-        'Accept': 'application/json'
-    };
+// Кэш — просто объект в памяти, как коробка под сиденьем
+let cache = {
+  flightdata: null,
+  updates: null,
+  lastUpdate: 0 // когда последний раз обновляли
 };
 
-// --- Routes ---
+// Базовый адрес DAA API
+const BASE_URL = 'https://api.daa.ie/dub/aops/flightdata/operational/v1';
 
-/**
- * Root Route
- * Provides basic information about the API when accessing localhost:3000 directly.
- */
-app.get('/', (req, res) => {
-    res.json({
-        name: 'Dublin Flight Proxy API',
-        status: 'Running',
-        endpoints: [
-            '/health',
-            '/flightdata',
-            '/updates'
-        ],
-        documentation: 'This is a backend proxy. Use the frontend application to view data.'
-    });
-});
+// Заголовки для аутентификации — берём из .env
+const headers = {
+  app_id: process.env.APP_ID,
+  app_key: process.env.APP_KEY
+};
 
-/**
- * Health Check Route
- * Used by the frontend to verify the server is running.
- */
+// Функция, которая ездит за данными
+async function fetchData(endpoint) {
+  try {
+    const response = await axios.get(`${BASE_URL}${endpoint}`, { headers });
+    return response.data;
+  } catch (error) {
+    console.error(`Ошибка при запросе ${endpoint}:`, error.message);
+    throw error;
+  }
+}
+
+// Обновляем кэш (вызываем раз в 5 минут)
+async function updateCache() {
+  try {
+    console.log('Обновляю кэш...');
+
+    cache.flightdata = await fetchData('/carrier/EI,BA,IB,VY,I2,AA,T2');
+    cache.updates = await fetchData('/updates/carrier/EI,BA,IB,VY,I2,AA,T2');
+
+    cache.lastUpdate = Date.now();
+    console.log('Кэш обновлён успешно!');
+  } catch (error) {
+    console.error('Не удалось обновить кэш:', error);
+  }
+}
+
+// Запускаем обновление каждые 5 минут (cron: */5 * * * *)
+cron.schedule('*/5 * * * *', updateCache);
+
+// Первый запуск — сразу обновляем, чтобы не ждать 5 минут
+updateCache();
+
+// Проверка, что сервер живой
 app.get('/health', (req, res) => {
-    res.status(200).json({ status: 'ok', message: 'Server is healthy' });
+  res.json({ status: 'OK', message: 'Сервер работает, данные о рейсах на подходе' });
 });
 
-/**
- * GET /flightdata
- * Proxies request to DAA flight data API.
- * Forwards any query parameters sent by the client.
- */
-app.get('/flightdata', async (req, res) => {
-    try {
-        const url = `${API_BASE_URL}/carrier/${CARRIERS}`;
-        
-        console.log(`Fetching flight data from: ${url}`);
-
-        const response = await axios.get(url, {
-            headers: getHeaders(),
-            params: req.query // Forward query params like ?date=...
-        });
-
-        res.json(response.data);
-    } catch (error) {
-        console.error('Error in /flightdata:', error.message);
-        
-        if (error.response) {
-            // The request was made and the server responded with a status code
-            // that falls out of the range of 2xx
-            res.status(error.response.status).json({
-                error: 'External API Error',
-                details: error.response.data
-            });
-        } else if (error.request) {
-            // The request was made but no response was received
-            res.status(503).json({ error: 'No response from external API' });
-        } else {
-            // Something happened in setting up the request that triggered an Error
-            res.status(500).json({ error: error.message });
-        }
-    }
+// Отдаём кэшированные данные flightdata
+app.get('/flightdata', (req, res) => {
+  if (!cache.flightdata) {
+    return res.status(503).json({ error: 'Данные ещё загружаются, подожди 10–30 секунд' });
+  }
+  res.json(cache.flightdata);
 });
 
-/**
- * GET /updates
- * Proxies request to DAA updates API.
- */
-app.get('/updates', async (req, res) => {
-    try {
-        const url = `${API_BASE_URL}/updates/carrier/${CARRIERS}`;
-        
-        console.log(`Fetching updates from: ${url}`);
-
-        const response = await axios.get(url, {
-            headers: getHeaders(),
-            params: req.query
-        });
-
-        res.json(response.data);
-    } catch (error) {
-        console.error('Error in /updates:', error.message);
-        
-        const status = error.response ? error.response.status : 500;
-        const data = error.response ? error.response.data : { error: error.message };
-        
-        res.status(status).json(data);
-    }
+// Отдаём кэшированные updates
+app.get('/updates', (req, res) => {
+  if (!cache.updates) {
+    return res.status(503).json({ error: 'Данные ещё загружаются, подожди 10–30 секунд' });
+  }
+  res.json(cache.updates);
 });
 
-// Start the server
+// Если ошибка — показываем красиво
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ error: 'Что-то сломалось на сервере' });
+});
+
+// Запускаем сервер
 app.listen(PORT, () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
+  console.log(`Сервер запущен на порту ${PORT}`);
+  console.log('Проверь: http://localhost:3000/health');
+  console.log('Данные: http://localhost:3000/flightdata и http://localhost:3000/updates');
 });
