@@ -1,116 +1,133 @@
+// server.js — весь бэкенд в одном файле, простой как трактор для пушбэка
+
 import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
 import axios from 'axios';
-import cron from 'node-cron';
 
-dotenv.config(); // загружаем .env
+dotenv.config(); // читаем .env
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Логируем все запросы — видно, кто и когда пришёл
+// Логируем все запросы — видно в терминале, кто и куда стучится
 app.use(morgan('dev'));
 
-// Разрешаем фронту с любого домена стучаться
+// Разрешаем фронту с любого места (Vercel, localhost и т.д.)
 app.use(cors());
 
 // Читаем JSON, если кто-то пришлёт
 app.use(express.json());
 
-// Кэш — просто объект в памяти, как коробка под сиденьем
-let cache = {
-  flightdata: null,
-  updates: null,
-  lastUpdate: 0 // когда последний раз обновляли
-};
+// Проверяем, что ключи вообще есть
+console.log('APP_ID из .env:', process.env.APP_ID ? 'есть' : 'НЕТ APP_ID!!!');
+console.log('APP_KEY из .env:', process.env.APP_KEY ? 'есть' : 'НЕТ APP_KEY!!!');
 
-// Базовый адрес DAA API
-const BASE_URL = 'https://api.daa.ie/dub/aops/flightdata/operational/v1';
-
-// Заголовки для аутентификации — берём из .env
-const headers = {
-  app_id: process.env.APP_ID,
-  app_key: process.env.APP_KEY
-};
-
-// Функция, которая ездит за данными
-async function fetchData(endpoint) {
-  try {
-    const response = await axios.get(`${BASE_URL}${endpoint}`, { headers });
-    return response.data;
-  } catch (error) {
-    console.error(`Ошибка при запросе ${endpoint}:`, error.message);
-    throw error;
-  }
-}
-
-// Обновляем кэш (вызываем раз в 5 минут)
-async function updateCache() {
-  try {
-    console.log('Обновляю кэш...');
-
-    cache.flightdata = await fetchData('/carrier/EI,BA,IB,VY,I2,AA,T2');
-    cache.updates = await fetchData('/updates/carrier/EI,BA,IB,VY,I2,AA,T2');
-
-    cache.lastUpdate = Date.now();
-    console.log('Кэш обновлён успешно!');
-  } catch (error) {
-    console.error('Не удалось обновить кэш:', error);
-  }
-}
-
-// Запускаем обновление каждые 5 минут (cron: */5 * * * *)
-cron.schedule('*/5 * * * *', updateCache);
-
-// Первый запуск — сразу обновляем, чтобы не ждать 5 минут
-updateCache();
-
-// Проверка, что сервер живой
-app.get('/health', (req, res) => {
-  res.json({ status: 'OK', message: 'Сервер работает, данные о рейсах на подходе' });
-});
-
-// Отдаём кэшированные данные flightdata
-app.get('/flightdata', (req, res) => {
-  if (!cache.flightdata) {
-    return res.status(503).json({ error: 'Данные ещё загружаются, подожди 10–30 секунд' });
-  }
-  res.json(cache.flightdata);
-});
-
-// Отдаём кэшированные updates
-app.get('/updates', (req, res) => {
-  if (!cache.updates) {
-    return res.status(503).json({ error: 'Данные ещё загружаются, подожди 10–30 секунд' });
-  }
-  res.json(cache.updates);
-});
-
-// Если ошибка — показываем красиво
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ error: 'Что-то сломалось на сервере' });
-});
-
-// Добавь это перед app.listen
+// Главная страница — чтобы не было Cannot GET /
 app.get('/', (req, res) => {
   res.send(`
-    <h1>Привет! Это бэкенд GOPS</h1>
-    <p>Сервер работает нормально.</p>
+    <h1>GOPS бэкенд работает!</h1>
+    <p>Проверь эти ссылки:</p>
     <ul>
-      <li>Проверь здоровье: <a href="/health">/health</a></li>
-      <li>Данные о рейсах: <a href="/flightdata">/flightdata</a></li>
-      <li>Обновления: <a href="/updates">/updates</a></li>
+      <li><a href="/health">/health</a> — проверка сервера</li>
+      <li><a href="/flightdata">/flightdata</a> — все рейсы</li>
+      <li><a href="/updates">/updates</a> — обновления</li>
     </ul>
-    <p>Если ты на Vercel — используй https://твой-сайт.vercel.app/flightdata</p>
+    <p>Если ошибка — смотри консоль терминала!</p>
   `);
 });
 
-// Запускаем сервер
+// Проверка, что сервер живой
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'OK',
+    message: 'Сервер работает, готов тянуть рейсы EI, BA и остальных',
+    time: new Date().toISOString()
+  });
+});
+
+// Функция для запроса к DAA — общая для обоих эндпоинтов
+async function fetchFromDAA(endpoint) {
+  console.log(`Запрашиваю DAA: ${endpoint}`);
+
+  if (!process.env.APP_ID || !process.env.APP_KEY) {
+    throw new Error('Нет APP_ID или APP_KEY в .env');
+  }
+
+  const response = await axios.get(
+    `https://api.daa.ie/dub/aops/flightdata/operational/v1${endpoint}`,
+    {
+      headers: {
+        app_id: process.env.APP_ID,
+        app_key: process.env.APP_KEY
+      },
+      timeout: 15000 // 15 секунд максимум, чтобы не висеть вечно
+    }
+  );
+
+  console.log(`Получил ответ от DAA, статус: ${response.status}`);
+  return response.data;
+}
+
+// GET /flightdata — полный список рейсов
+app.get('/flightdata', async (req, res) => {
+  try {
+    const data = await fetchFromDAA('/carrier/EI,BA,IB,VY,I2,AA,T2');
+    res.json(data);
+  } catch (error) {
+    console.error('Ошибка в /flightdata:', error.message);
+
+    if (error.response) {
+      // DAA ответил с ошибкой (самая частая причина)
+      console.error('Статус от DAA:', error.response.status);
+      console.error('Что ответил DAA:', error.response.data);
+      res.status(error.response.status).json({
+        error: 'Ошибка от DAA API',
+        status: error.response.status,
+        message: error.response.data?.message || error.message
+      });
+    } else if (error.request) {
+      // Запрос ушёл, но ответа нет (сеть, таймаут, блокировка)
+      res.status(504).json({ error: 'Нет ответа от DAA API (таймаут или сеть)' });
+    } else {
+      // Другая ошибка (например, нет ключей)
+      res.status(500).json({ error: 'Внутренняя ошибка сервера', details: error.message });
+    }
+  }
+});
+
+// GET /updates — обновления
+app.get('/updates', async (req, res) => {
+  try {
+    const data = await fetchFromDAA('/updates/carrier/EI,BA,IB,VY,I2,AA,T2');
+    res.json(data);
+  } catch (error) {
+    console.error('Ошибка в /updates:', error.message);
+
+    if (error.response) {
+      console.error('Статус от DAA:', error.response.status);
+      console.error('Что ответил DAA:', error.response.data);
+      res.status(error.response.status).json({
+        error: 'Ошибка от DAA API (updates)',
+        status: error.response.status,
+        message: error.response.data?.message || error.message
+      });
+    } else if (error.request) {
+      res.status(504).json({ error: 'Нет ответа от DAA API (updates)' });
+    } else {
+      res.status(500).json({ error: 'Внутренняя ошибка', details: error.message });
+    }
+  }
+});
+
+// Запуск сервера
 app.listen(PORT, () => {
   console.log(`Сервер запущен на порту ${PORT}`);
-  console.log('Проверь: http://localhost:3000/health');
-  console.log('Данные: http://localhost:3000/flightdata и http://localhost:3000/updates');
+  console.log('Проверь в браузере:');
+  console.log(`http://localhost:${PORT}/`);
+  console.log(`http://localhost:${PORT}/health`);
+  console.log(`http://localhost:${PORT}/flightdata`);
+  console.log(`http://localhost:${PORT}/updates`);
+  console.log('Смотри консоль — там будут все ошибки и что происходит!');
 });
