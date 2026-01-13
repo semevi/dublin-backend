@@ -94,6 +94,20 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Что-то сломалось на сервере' });
 });
 
+// Добавь это перед app.listen
+app.get('/', (req, res) => {
+  res.send(`
+    <h1>Привет! Это бэкенд GOPS</h1>
+    <p>Сервер работает нормально.</p>
+    <ul>
+      <li>Проверь здоровье: <a href="/health">/health</a></li>
+      <li>Данные о рейсах: <a href="/flightdata">/flightdata</a></li>
+      <li>Обновления: <a href="/updates">/updates</a></li>
+    </ul>
+    <p>Если ты на Vercel — используй https://твой-сайт.vercel.app/flightdata</p>
+  `);
+});
+
 // Запускаем сервер
 app.listen(PORT, () => {
   console.log(`Сервер запущен на порту ${PORT}`);
