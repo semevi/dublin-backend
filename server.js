@@ -29,7 +29,7 @@ let cache = {
 async function testKeys(id, key) {
   try {
     console.log(`[TEST] Проверяю ключи... ${new Date().toISOString()}`);
-    const testUrl = 'https://api.daa.ie/dub/aops/flightdata/operational/v1/carrier/EI';
+    const testUrl = 'https://api.daa.ie/dub/aops/flightdata/operational/v1/carrier/EI,BA,IB,VY,I2,AA,T2';
     await axios.get(testUrl, {
       headers: { app_id: id, app_key: key, Accept: 'application/json' },
       timeout: 15000
