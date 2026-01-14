@@ -9,17 +9,17 @@
     "dev": "nodemon server.js"
   },
   "dependencies": {
-    "axios": "^1.7.2", // для запросов к API
-    "cors": "^2.8.5", // для CORS
-    "dotenv": "^16.4.5", // для .env
-    "express": "^4.19.2", // основной сервер
-    "morgan": "^1.10.0", // для логов
-    "node-cron": "^3.0.3" // для таймера обновлений
+    "axios": "^1.7.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "morgan": "^1.10.0",
+    "node-cron": "^3.0.3"
   },
-   "engines": {
+  "engines": {
     "node": ">=18.0.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.4" // для dev
+    "nodemon": "^3.1.4"
   }
 }
