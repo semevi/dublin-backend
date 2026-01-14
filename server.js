@@ -34,7 +34,7 @@ async function testKeys(id, key) {
     console.log("URL:", testUrl || fullUrl);
     await axios.get(testUrl, {
       headers: { app_id: id, app_key: key, Accept: 'application/json' },
-      timeout: 15000
+      timeout: 45000
     });
     console.log('[TEST] Ключи рабочие!');
     return true;
@@ -67,7 +67,7 @@ async function fetchDAA(endpoint) {
           app_key: currentAppKey,
           Accept: 'application/json'
         },
-        timeout: 30000  // 30 секунд — даём шанс, если медленно
+        timeout: 45000  // 30 секунд — даём шанс, если медленно
       }
     );
     console.log(`[FETCH] Успех: ${endpoint}`);
