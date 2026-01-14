@@ -8,58 +8,55 @@ import axios from 'axios';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT || 3000;  // Render сам даёт свой порт, локально будет 3000
 
 app.use(morgan('dev'));
 app.use(cors());
 app.use(express.json());
 
-// Ключи храним здесь (в памяти сервера)
+// Ключи храним в памяти сервера
 let currentAppId = process.env.APP_ID || null;
 let currentAppKey = process.env.APP_KEY || null;
 
-// Кэш данных рейсов
+// Кэш данных
 let cache = {
   flightdata: null,
   updates: null,
   lastUpdate: 0
 };
 
-// Функция проверки ключей — делает реальный запрос
+// Проверка ключей — реальный запрос к API
 async function testKeys(id, key) {
   try {
-    console.log(`Тест ключей начат: ${new Date().toISOString()}`);
+    console.log(`[TEST] Проверяю ключи... ${new Date().toISOString()}`);
     const testUrl = 'https://api.daa.ie/dub/aops/flightdata/operational/v1/carrier/EI';
-    const response = await axios.get(testUrl, {
-      headers: {
-        app_id: id,
-        app_key: key,
-        Accept: 'application/json'
-      },
-      timeout: 12000  // 12 секунд — даём шанс
+    await axios.get(testUrl, {
+      headers: { app_id: id, app_key: key, Accept: 'application/json' },
+      timeout: 15000
     });
-    console.log(`Тест успешен! Статус: ${response.status}`);
+    console.log('[TEST] Ключи рабочие!');
     return true;
   } catch (error) {
-    console.error('Тест ключей НЕ удался:');
-    console.error('Ошибка:', error.message);
+    console.error('[TEST] Ошибка проверки ключей:');
+    console.error('Сообщение:', error.message);
     if (error.response) {
-      console.error('Ответ от DAA API:', error.response.status, error.response.data || 'нет данных');
+      console.error('Статус от сервера DAA:', error.response.status);
+      console.error('Данные ответа:', error.response.data || 'нет данных');
     } else if (error.request) {
-      console.error('Запрос ушёл, но ответа нет — таймаут или блокировка');
+      console.error('Запрос ушёл, ответа нет — таймаут или блокировка');
     }
     return false;
   }
 }
 
-// Функция запроса к API DAA
+// Запрос к API DAA
 async function fetchDAA(endpoint) {
   if (!currentAppId || !currentAppKey) {
-    throw new Error('Нет ключей — зайди на /keys и введи их');
+    throw new Error('Нет ключей — зайди на /keys');
   }
 
   try {
-    console.log(`Запрос к DAA: ${endpoint} — ${new Date().toISOString()}`);
+    console.log(`[FETCH] Запрос: ${endpoint} — ${new Date().toISOString()}`);
     const response = await axios.get(
       `https://api.daa.ie/dub/aops/flightdata/operational/v1${endpoint}`,
       {
@@ -68,24 +65,24 @@ async function fetchDAA(endpoint) {
           app_key: currentAppKey,
           Accept: 'application/json'
         },
-        timeout: 20000  // 20 секунд — на всякий случай
+        timeout: 30000  // 30 секунд — даём шанс, если медленно
       }
     );
-    console.log(`Успех: ${endpoint}`);
+    console.log(`[FETCH] Успех: ${endpoint}`);
     return response.data;
   } catch (error) {
-    console.error(`Ошибка в запросе ${endpoint}:`, error.message);
+    console.error(`[FETCH] Ошибка в ${endpoint}:`, error.message);
     if (error.response) {
-      console.error('Статус от API:', error.response.status);
+      console.error('Статус:', error.response.status);
     }
     throw error;
   }
 }
 
-// Обновление кэша (запускаем каждые 5 минут)
+// Обновление кэша каждые 5 минут
 async function updateCache() {
   if (!currentAppId || !currentAppKey) {
-    console.log('Кэш не обновляем — нет ключей');
+    console.log('[CACHE] Нет ключей — пропускаем обновление');
     return;
   }
 
@@ -93,28 +90,28 @@ async function updateCache() {
     cache.flightdata = await fetchDAA('/carrier/EI,BA,IB,VY,I2,AA,T2');
     cache.updates = await fetchDAA('/updates/carrier/EI,BA,IB,VY,I2,AA,T2');
     cache.lastUpdate = Date.now();
-    console.log('Кэш обновлён успешно');
+    console.log('[CACHE] Обновлён успешно');
   } catch (e) {
-    console.error('Ошибка при обновлении кэша:', e.message);
+    console.error('[CACHE] Ошибка обновления:', e.message);
   }
 }
 
-// Проверяем ключи из .env при запуске сервера
+// Проверяем ключи из .env при запуске
 (async () => {
-  console.log('Сервер стартует...');
+  console.log('Сервер запускается...');
   if (currentAppId && currentAppKey) {
-    const isWorking = await testKeys(currentAppId, currentAppKey);
-    if (isWorking) {
-      console.log('Ключи из .env — рабочие! Запускаем кэш.');
-      updateCache();                   // первый запуск
-      setInterval(updateCache, 5 * 60 * 1000);  // каждые 5 минут
+    const ok = await testKeys(currentAppId, currentAppKey);
+    if (ok) {
+      console.log('Ключи из .env ОК — запускаем кэш');
+      updateCache();
+      setInterval(updateCache, 5 * 60 * 1000);
     } else {
-      console.log('Ключи из .env НЕ работают — ждём ввода через форму');
+      console.log('Ключи из .env НЕ работают — ждём форму /keys');
       currentAppId = null;
       currentAppKey = null;
     }
   } else {
-    console.log('В .env ключей нет — открывай браузер и заходи на /keys');
+    console.log('В .env ключей нет — заходи на /keys');
   }
 })();
 
@@ -122,45 +119,41 @@ async function updateCache() {
 app.get('/', (req, res) => {
   if (currentAppId && currentAppKey) {
     res.send(`
-      <h1>GOPS бэкенд ✈️ — всё работает!</h1>
-      <p>Ключи проверены и активны.</p>
-      <p><a href="/flightdata">Посмотреть рейсы</a> | <a href="/updates">Обновления</a></p>
+      <h1>GOPS бэкенд ✈️ — работает!</h1>
+      <p>Ключи есть и проверены.</p>
+      <p><a href="/flightdata">Рейсы</a> | <a href="/updates">Обновления</a></p>
       <p><a href="/keys">Сменить ключи</a></p>
     `);
   } else {
-    res.send(`
-      <h1>GOPS бэкенд ✈️</h1>
-      <p style="color: red; font-size: 20px;">Ключей нет или они не работают!</p>
-      <p>Зайди сюда → <a href="/keys">Ввести ключи DAA</a></p>
-    `);
+    res.redirect('/keys');
   }
 });
 
-// Страница с формой ввода ключей
+// Форма ввода ключей
 app.get('/keys', (req, res) => {
   res.send(`
     <!DOCTYPE html>
     <html lang="ru">
     <head>
       <meta charset="UTF-8">
-      <title>Ввод ключей DAA</title>
+      <title>Ключи DAA</title>
       <style>
         body { font-family: Arial; background: #f0f8ff; padding: 40px; text-align: center; }
-        .box { max-width: 500px; margin: auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-        input { width: 100%; padding: 12px; margin: 10px 0; box-sizing: border-box; font-size: 16px; }
-        button { padding: 15px 40px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 18px; }
-        #result { margin-top: 20px; padding: 15px; border: 1px solid #ccc; background: #fff; min-height: 80px; font-size: 16px; }
+        .box { max-width: 500px; margin: auto; background: white; padding: 30px; border-radius: 10px; }
+        input { width: 100%; padding: 12px; margin: 10px 0; box-sizing: border-box; }
+        button { padding: 15px 40px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        #result { margin-top: 20px; padding: 15px; border: 1px solid #ccc; background: #fff; min-height: 100px; }
       </style>
     </head>
     <body>
       <div class="box">
-        <h1>Введи ключи от DAA API</h1>
+        <h1>Введи ключи DAA</h1>
         <form id="form">
-          <input id="app_id" placeholder="app_id (например, 123abcde)" required>
-          <input id="app_key" placeholder="app_key (длинный ключ)" required>
-          <button type="submit">Проверить и сохранить</button>
+          <input id="app_id" placeholder="app_id" required>
+          <input id="app_key" placeholder="app_key" required>
+          <button type="submit">Сохранить и проверить</button>
         </form>
-        <div id="result">Жду твои ключи...</div>
+        <div id="result">Жду ввода...</div>
       </div>
       <script>
         const form = document.getElementById('form');
@@ -169,25 +162,17 @@ app.get('/keys', (req, res) => {
           e.preventDefault();
           const id = document.getElementById('app_id').value.trim();
           const key = document.getElementById('app_key').value.trim();
-          if (!id || !key) {
-            result.innerHTML = '<span style="color:red">Заполни оба поля!</span>';
-            return;
-          }
-          result.innerHTML = 'Проверяю... подожди 5–15 секунд...';
-          try {
-            const res = await fetch('/save-keys', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ app_id: id, app_key: key })
-            });
-            const data = await res.json();
-            if (data.success) {
-              result.innerHTML = '<span style="color:green">УСПЕХ! Ключи рабочие!<br>Теперь можно смотреть рейсы → <a href="/">На главную</a></span>';
-            } else {
-              result.innerHTML = '<span style="color:red">Ошибка: ' + (data.error || 'неизвестно') + '</span>';
-            }
-          } catch (err) {
-            result.innerHTML = '<span style="color:red">Не смог соединиться с сервером</span>';
+          result.innerHTML = 'Проверяю... подожди 10-20 сек...';
+          const res = await fetch('/save-keys', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ app_id: id, app_key: key })
+          });
+          const data = await res.json();
+          if (data.success) {
+            result.innerHTML = '<span style="color:green">УСПЕХ! Ключи работают!<br><a href="/">На главную</a></span>';
+          } else {
+            result.innerHTML = '<span style="color:red">Ошибка: ' + (data.error || 'неизвестно') + '</span>';
           }
         });
       </script>
@@ -199,31 +184,29 @@ app.get('/keys', (req, res) => {
 // Сохранение ключей + проверка
 app.post('/save-keys', async (req, res) => {
   const { app_id, app_key } = req.body;
-
   if (!app_id || !app_key) {
-    return res.json({ success: false, error: 'Оба поля обязательны' });
+    return res.json({ success: false, error: 'Введи оба поля' });
   }
 
-  const isValid = await testKeys(app_id, app_key);
-
-  if (!isValid) {
-    return res.json({ success: false, error: 'Ключи не работают (таймаут, неверные данные или API лежит)' });
+  const ok = await testKeys(app_id, app_key);
+  if (!ok) {
+    return res.json({ success: false, error: 'Ключи НЕ работают (таймаут или ошибка авторизации)' });
   }
 
   currentAppId = app_id;
   currentAppKey = app_key;
 
-  console.log('Новые ключи сохранены и проверены успешно!');
-  updateCache();  // сразу запускаем кэш
+  console.log('Новые ключи сохранены и проверены!');
+  updateCache();  // сразу запускаем
 
   res.json({ success: true });
 });
 
-// Эндпоинты для фронта
+// Эндпоинты данных
 app.get('/flightdata', async (req, res) => {
   try {
     if (!cache.flightdata) await updateCache();
-    res.json(cache.flightdata || { message: 'Данные ещё загружаются...' });
+    res.json(cache.flightdata || { message: 'Данные загружаются...' });
   } catch (e) {
     res.status(503).json({ error: e.message });
   }
@@ -232,13 +215,14 @@ app.get('/flightdata', async (req, res) => {
 app.get('/updates', async (req, res) => {
   try {
     if (!cache.updates) await updateCache();
-    res.json(cache.updates || { message: 'Данные ещё загружаются...' });
+    res.json(cache.updates || { message: 'Данные загружаются...' });
   } catch (e) {
     res.status(503).json({ error: e.message });
   }
 });
 
-app.listen(PORT, () => {
+// Запуск сервера — правильно для Render
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`Сервер запущен на порту ${PORT}`);
-  console.log('Зайди в браузер: http://localhost:' + PORT + ' или на Render URL');
+  console.log('Если ключи не работают — заходи на /keys');
 });
