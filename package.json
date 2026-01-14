@@ -5,8 +5,8 @@
   "main": "server.js",
   "type": "module",
   "scripts": {
-    "start": "node server.js", // для production, как в Vercel
-    "dev": "nodemon server.js" // для development, с авто-перезапуском
+    "start": "node server.js",
+    "dev": "nodemon server.js" 
   },
   "dependencies": {
     "axios": "^1.7.2", // для запросов к API
