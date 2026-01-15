@@ -1,153 +1,166 @@
-import express from 'express';
-import session from 'express-session';
+const express = require('express');
+const axios = require('axios');
+const cookieParser = require('cookie-parser');
+const bodyParser = require('body-parser');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const port = process.env.PORT || 3000;
 
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
+// Middleware
+app.use(cookieParser());
+app.use(bodyParser.urlencoded({ extended: true }));
 
-// Сессия — чтобы ключи помнились
-app.use(session({
-  secret: 'мой_очень_длинный_секрет_1234567890abcdef', // поменяй на свой
-  resave: false,
-  saveUninitialized: false,
-  cookie: { maxAge: 24 * 60 * 60 * 1000 } // 24 часа
-}));
-
-// Главная страница — всё здесь
-app.get('/', (req, res) => {
-  const hasKeys = !!req.session.app_id;
-  const keyHint = hasKeys ? `App Key заканчивается на ...${req.session.app_key?.slice(-4) || ''}` : 'ключи не введены';
-
-  res.send(`
-    <!DOCTYPE html>
-    <html lang="ru">
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>DAA Рейсы</title>
-      <style>
-        body { font-family: Arial; background: #f0f2f5; margin: 0; padding: 20px; text-align: center; }
-        .box { max-width: 700px; margin: auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
-        h1 { color: #333; }
-        .status { font-size: 18px; padding: 12px; margin: 20px 0; border-radius: 8px; background: ${hasKeys ? '#d4edda' : '#fff3cd'}; color: ${hasKeys ? '#155724' : '#856404'}; }
-        input { width: 100%; padding: 12px; margin: 10px 0; border: 2px solid #ddd; border-radius: 6px; font-size: 16px; box-sizing: border-box; }
-        button { background: #667eea; color: white; border: none; padding: 14px; width: 100%; margin: 10px 0; border-radius: 6px; font-size: 18px; cursor: pointer; }
-        button:hover { background: #5a67d8; }
-        .btn-group { display: flex; gap: 15px; justify-content: center; flex-wrap: wrap; margin: 30px 0; }
-        .action-btn { background: #48bb78; padding: 16px 40px; font-size: 18px; border-radius: 8px; color: white; border: none; cursor: pointer; min-width: 200px; }
-        .action-btn.updates { background: #4299e1; }
-        #loading { margin-top: 20px; font-size: 18px; color: #666; display: none; }
-        #response { margin-top: 20px; padding: 20px; background: #f7fafc; border-radius: 8px; white-space: pre-wrap; text-align: left; max-height: 500px; overflow-y: auto; display: none; }
-      </style>
-    </head>
-    <body>
-      <div class="box">
-        <h1>✈️ DAA Рейсы</h1>
-        <div class="status">Статус: ${keyHint}</div>
-
-        <form action="/save-keys" method="POST">
-          <input type="text" name="app_id" placeholder="App ID" value="${req.session.app_id || ''}" required>
-          <input type="text" name="app_key" placeholder="App Key" value="${req.session.app_key || ''}" required>
-          <button type="submit">Сохранить ключи</button>
-        </form>
-
-        <div class="btn-group">
-          <button class="action-btn" onclick="loadData('/flights')">Все рейсы</button>
-          <button class="action-btn updates" onclick="loadData('/updates')">Обновления</button>
+// HTML Template Generator
+const getHtml = (message = '', type = 'info') => {
+  const messageColor = type === 'error' ? 'bg-red-100 text-red-700 border-red-200' : 'bg-green-100 text-green-700 border-green-200';
+  
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DAA API Interface</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 min-h-screen flex items-center justify-center font-sans text-slate-800">
+    <div class="max-w-2xl w-full mx-4">
+        <!-- Header -->
+        <div class="bg-white rounded-t-xl shadow-sm border-b border-slate-200 p-8 text-center">
+            <h1 class="text-3xl font-bold text-blue-600 mb-2">DAA API</h1>
+            <p class="text-slate-500">Dublin Airport Operational Flight Data</p>
         </div>
 
-        <div id="loading">Загружаю... подожди 20–60 секунд...</div>
-        <div id="response"></div>
-      </div>
+        <!-- Main Content -->
+        <div class="bg-white rounded-b-xl shadow-lg p-8 space-y-8">
+            
+            ${message ? `<div class="p-4 rounded-lg border ${messageColor}">${message}</div>` : ''}
 
-      <script>
-        async function loadData(url) {
-          const loading = document.getElementById('loading');
-          const resp = document.getElementById('response');
-          loading.style.display = 'block';
-          resp.style.display = 'none';
-          resp.innerHTML = '';
+            <!-- Step 1: Authorization -->
+            <section>
+                <div class="flex items-center gap-3 mb-4">
+                    <span class="flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 text-blue-600 font-bold text-sm">1</span>
+                    <h2 class="text-xl font-semibold">Authorization Configuration</h2>
+                </div>
+                <div class="bg-slate-50 p-6 rounded-lg border border-slate-200">
+                    <form action="/set-auth" method="POST" class="space-y-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-slate-700 mb-1">App ID</label>
+                                <input type="text" name="app_id" placeholder="Enter App ID" required 
+                                    class="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-slate-700 mb-1">App Key</label>
+                                <input type="text" name="app_key" placeholder="Enter App Key" required 
+                                    class="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all">
+                            </div>
+                        </div>
+                        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 px-4 rounded-lg transition-colors flex items-center justify-center gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" /></svg>
+                            Save Credentials
+                        </button>
+                    </form>
+                </div>
+            </section>
 
-          try {
-            const r = await fetch(url);
-            if (!r.ok) throw new Error('Ошибка: ' + r.status);
-            const data = await r.json();
-            resp.innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
-            resp.style.display = 'block';
-          } catch (e) {
-            resp.innerHTML = 'Ошибка: ' + e.message;
-            resp.style.display = 'block';
-          } finally {
-            loading.style.display = 'none';
-          }
-        }
-      </script>
-    </body>
-    </html>
-  `);
+            <hr class="border-slate-100" />
+
+            <!-- Step 2: Data Retrieval -->
+            <section>
+                <div class="flex items-center gap-3 mb-4">
+                    <span class="flex items-center justify-center w-8 h-8 rounded-full bg-purple-100 text-purple-600 font-bold text-sm">2</span>
+                    <h2 class="text-xl font-semibold">Data Endpoints</h2>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <a href="/proxy/operational" target="_blank" class="group relative flex flex-col items-center justify-center p-6 bg-white border-2 border-slate-200 rounded-xl hover:border-purple-500 hover:bg-purple-50 transition-all cursor-pointer text-center no-underline">
+                        <div class="mb-3 p-3 bg-purple-100 text-purple-600 rounded-full group-hover:scale-110 transition-transform">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                        </div>
+                        <span class="font-semibold text-slate-800 group-hover:text-purple-700">Get Operational Data</span>
+                        <span class="text-xs text-slate-500 mt-1">/operational/v1/carrier/...</span>
+                    </a>
+
+                    <a href="/proxy/updates" target="_blank" class="group relative flex flex-col items-center justify-center p-6 bg-white border-2 border-slate-200 rounded-xl hover:border-emerald-500 hover:bg-emerald-50 transition-all cursor-pointer text-center no-underline">
+                        <div class="mb-3 p-3 bg-emerald-100 text-emerald-600 rounded-full group-hover:scale-110 transition-transform">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                        </div>
+                        <span class="font-semibold text-slate-800 group-hover:text-emerald-700">Get Updates</span>
+                        <span class="text-xs text-slate-500 mt-1">/updates/carrier/...</span>
+                    </a>
+                </div>
+            </section>
+        </div>
+        
+        <div class="text-center mt-6 text-slate-400 text-sm">
+            Powered by Node.js & Tailwind CSS
+        </div>
+    </div>
+</body>
+</html>
+`};
+
+// Routes
+
+// 1. Main Page
+app.get('/', (req, res) => {
+    res.send(getHtml());
 });
 
-// Сохраняем ключи
-app.post('/save-keys', (req, res) => {
-  req.session.app_id = req.body.app_id?.trim();
-  req.session.app_key = req.body.app_key?.trim();
-  res.redirect('/');
+// 2. Set Headers (Auth)
+app.post('/set-auth', (req, res) => {
+    const { app_id, app_key } = req.body;
+    
+    if (!app_id || !app_key) {
+        return res.send(getHtml('Both App ID and App Key are required.', 'error'));
+    }
+
+    // Store credentials in HTTP-only cookies
+    res.cookie('app_id', app_id, { httpOnly: true, maxAge: 24 * 60 * 60 * 1000 }); // 1 day
+    res.cookie('app_key', app_key, { httpOnly: true, maxAge: 24 * 60 * 60 * 1000 });
+    
+    res.send(getHtml('Authorization headers have been recorded successfully. You can now use the API links.', 'success'));
 });
 
-// Рейсы
-app.get('/flights', async (req, res) => {
-  if (!req.session.app_id || !req.session.app_key) {
-    return res.status(401).json({ error: 'Нет ключей' });
-  }
+// Helper function for API proxying
+const fetchFromDaa = async (req, res, endpointUrl) => {
+    const { app_id, app_key } = req.cookies;
 
-  try {
-    const r = await fetch(
-      'https://api.daa.ie/dub/aops/flightdata/operational/v1/carrier/EI,BA,IB,VY,I2,AA,T2',
-      {
-        headers: {
-          app_id: req.session.app_id,
-          app_key: req.session.app_key,
-          Accept: 'application/json'
-        }
-      }
-    );
+    if (!app_id || !app_key) {
+        return res.status(401).send(getHtml('Unauthorized. Please set App ID and App Key first using the form.', 'error'));
+    }
 
-    if (!r.ok) throw new Error(`DAA: ${r.status}`);
-    const data = await r.json();
-    res.json(data);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+    try {
+        const response = await axios.get(endpointUrl, {
+            headers: {
+                'app_id': app_id,
+                'app_key': app_key,
+                'Accept': 'application/json'
+            }
+        });
+        res.json(response.data);
+    } catch (error) {
+        res.status(error.response?.status || 500).json({
+            error: 'Failed to fetch data from DAA API',
+            message: error.message,
+            upstream_response: error.response?.data
+        });
+    }
+};
+
+// 3. Proxy Link: Operational Data
+app.get('/proxy/operational', (req, res) => {
+    const url = 'https://api.daa.ie/dub/aops/flightdata/operational/v1/carrier/EI,BA,IB,VY,I2,AA,T2';
+    fetchFromDaa(req, res, url);
 });
 
-// Обновления
-app.get('/updates', async (req, res) => {
-  if (!req.session.app_id || !req.session.app_key) {
-    return res.status(401).json({ error: 'Нет ключей' });
-  }
-
-  try {
-    const r = await fetch(
-      'https://api.daa.ie/dub/aops/flightdata/operational/v1/updates/carrier/EI,BA,IB,VY,I2,AA,T2',
-      {
-        headers: {
-          app_id: req.session.app_id,
-          app_key: req.session.app_key,
-          Accept: 'application/json'
-        }
-      }
-    );
-
-    if (!r.ok) throw new Error(`DAA: ${r.status}`);
-    const data = await r.json();
-    res.json(data);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+// 4. Proxy Link: Updates Data
+app.get('/proxy/updates', (req, res) => {
+    const url = 'https://api.daa.ie/dub/aops/flightdata/operational/v1/updates/carrier/EI,BA,IB,VY,I2,AA,T2';
+    fetchFromDaa(req, res, url);
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Сервер работает на порту ${PORT}`);
+app.listen(port, () => {
+    console.log(`Server is running at http://localhost:${port}`);
 });
