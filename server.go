@@ -26,7 +26,7 @@ var (
 		updates    interface{}
 		lastUpdate int64
 	}
-	cacheMutex sync.Mutex // это как замок, чтобы два человека не лезли одновременно
+	cacheMutex sync.Mutex // замок, чтобы не было одновременного доступа
 
 	// Красивая страничка с формой
 	keysPage = template.Must(template.New("keys").Parse(`
@@ -81,7 +81,6 @@ var (
 )
 
 func main() {
-	// Загружаем .env (если есть)
 	godotenv.Load()
 
 	currentAppId = os.Getenv("APP_ID")
@@ -89,6 +88,9 @@ func main() {
 
 	log.Println("Старт сервера...")
 	log.Println("Ключи из .env: app_id =", ifYesNo(currentAppId), ", app_key =", ifYesNo(currentAppKey))
+
+	// Показываем внешний IP сервера (чтобы понять, видит ли DAA наш IP)
+	showMyIP()
 
 	if currentAppId != "" && currentAppKey != "" {
 		if testKeys(currentAppId, currentAppKey) {
@@ -98,15 +100,14 @@ func main() {
 		}
 	}
 
-	// Запускаем обновление кэша каждые 5 минут
+	// Автообновление кэша каждые 5 минут
 	go func() {
 		updateCache()
-		for range time.Tick(1 * time.Minute) {
+		for range time.Tick(5 * time.Minute) {
 			updateCache()
 		}
 	}()
 
-	// Страницы
 	http.HandleFunc("/", homePage)
 	http.HandleFunc("/keys", keysPageHandler)
 	http.HandleFunc("/save-keys", saveKeysHandler)
@@ -123,6 +124,17 @@ func ifYesNo(s string) string {
 		return "есть"
 	}
 	return "НЕТ"
+}
+
+func showMyIP() {
+	resp, err := http.Get("https://api.ipify.org?format=text")
+	if err != nil {
+		log.Println("Не удалось узнать внешний IP:", err)
+		return
+	}
+	defer resp.Body.Close()
+	ip, _ := io.ReadAll(resp.Body)
+	log.Println("Внешний IP этого сервера:", string(ip))
 }
 
 func homePage(w http.ResponseWriter, r *http.Request) {
@@ -161,7 +173,7 @@ func saveKeysHandler(w http.ResponseWriter, r *http.Request) {
 	log.Println("Новые ключи сохранены:", data.AppId[:4]+"...")
 
 	if testKeys(currentAppId, currentAppKey) {
-		updateCache() // сразу обновим данные с новыми ключами
+		updateCache()
 		json.NewEncoder(w).Encode(map[string]any{"success": true})
 	} else {
 		json.NewEncoder(w).Encode(map[string]any{"success": false, "error": "Ключи НЕ работают"})
@@ -174,66 +186,87 @@ func testKeys(id, key string) bool {
 	req.Header.Set("app_id", id)
 	req.Header.Set("app_key", key)
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "GOPS-Backend/1.0 (Dublin Ground Handling Tool)")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Println("Ошибка запроса в testKeys:", err)
+		log.Println("Ошибка соединения в testKeys:", err)
 		return false
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
-	log.Printf("testKeys статус: %d | тело: %s", resp.StatusCode, string(body))
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	body := string(bodyBytes)
+
+	log.Printf("testKeys → статус: %d | ответ: %s", resp.StatusCode, body)
 
 	return resp.StatusCode == 200
 }
 
 func fetchDAA(endpoint string) (interface{}, error) {
 	if currentAppId == "" || currentAppKey == "" {
-		return nil, fmt.Errorf("Нет ключей")
+		return nil, fmt.Errorf("Нет ключей — зайди на /keys")
 	}
+
 	url := "https://api.daa.ie/dub/aops/flightdata/operational/v1" + endpoint
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("app_id", currentAppId)
 	req.Header.Set("app_key", currentAppKey)
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "GOPS-Backend/1.0 (Dublin Ground Handling Tool)")
 
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
+		log.Println("Ошибка соединения в fetchDAA:", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	log.Printf("fetchDAA статус: %d для %s", resp.StatusCode, endpoint)
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	body := string(bodyBytes)
+
+	log.Printf("fetchDAA → %s | статус: %d | ответ: %s", endpoint, resp.StatusCode, body)
 
 	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		log.Printf("Ошибка от DAA: %s", string(body))
-		return nil, fmt.Errorf("DAA вернул %d", resp.StatusCode)
+		return nil, fmt.Errorf("DAA вернул статус %d: %s", resp.StatusCode, body)
 	}
 
 	var result interface{}
-	json.NewDecoder(resp.Body).Decode(&result)
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		log.Println("Ошибка парсинга JSON от DAA:", err)
+		return nil, err
+	}
+
 	return result, nil
 }
 
 func updateCache() {
+	log.Println("Начинаю обновление кэша...")
+
 	flightdata, err1 := fetchDAA("/carrier/EI,BA,IB,VY,I2,AA,T2")
-	updates, err2 := fetchDAA("/updates/carrier/EI,BA,IB,VY,I2,AA,T2")
-
-	cacheMutex.Lock()
-	defer cacheMutex.Unlock()
-
-	if err1 == nil {
+	if err1 != nil {
+		log.Println("Ошибка получения flightdata:", err1)
+	} else {
+		cacheMutex.Lock()
 		cache.flightdata = flightdata
+		cacheMutex.Unlock()
 	}
-	if err2 == nil {
+
+	updates, err2 := fetchDAA("/updates/carrier/EI,BA,IB,VY,I2,AA,T2")
+	if err2 != nil {
+		log.Println("Ошибка получения updates:", err2)
+	} else {
+		cacheMutex.Lock()
 		cache.updates = updates
+		cacheMutex.Unlock()
 	}
+
 	if err1 == nil || err2 == nil {
+		cacheMutex.Lock()
 		cache.lastUpdate = time.Now().Unix()
-		log.Println("Кэш обновлён")
+		cacheMutex.Unlock()
+		log.Println("Кэш обновлён успешно")
 	}
 }
 
@@ -250,7 +283,7 @@ func flightdataHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if data == nil {
-		http.Error(w, "Не могу получить данные — проверь ключи", 500)
+		http.Error(w, "Не могу получить данные — проверь ключи и логи", 500)
 		return
 	}
 	json.NewEncoder(w).Encode(data)
@@ -269,7 +302,7 @@ func updatesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if data == nil {
-		http.Error(w, "Не могу получить данные — проверь ключи", 500)
+		http.Error(w, "Не могу получить данные — проверь ключи и логи", 500)
 		return
 	}
 	json.NewEncoder(w).Encode(data)
