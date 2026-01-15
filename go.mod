@@ -1,3 +1,3 @@
-module github.com/semevi/dublin-backend/
+module github.com/semevi/dublin-backend
 
 go 1.23  
