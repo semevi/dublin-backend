@@ -4,6 +4,7 @@
   "type": "module",
   "description": "Node.js server for DAA API proxy",
   "main": "server.js",
+  "license": "MIT",
   "scripts": {
     "start": "node server.js"
   },
