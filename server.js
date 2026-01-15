@@ -110,8 +110,12 @@ app.get('/', (req, res) => {
 
 // 2. Set Headers (Auth)
 app.post('/set-auth', (req, res) => {
-    const { app_id, app_key } = req.body;
+    let { app_id, app_key } = req.body;
     
+    // Trim whitespace to avoid errors
+    app_id = app_id ? app_id.trim() : '';
+    app_key = app_key ? app_key.trim() : '';
+
     if (!app_id || !app_key) {
         return res.send(getHtml('Both App ID and App Key are required.', 'error'));
     }
@@ -125,27 +129,60 @@ app.post('/set-auth', (req, res) => {
 
 // Helper function for API proxying
 const fetchFromDaa = async (req, res, endpointUrl) => {
-    const { app_id, app_key } = req.cookies;
+    let { app_id, app_key } = req.cookies;
 
     if (!app_id || !app_key) {
         return res.status(401).send(getHtml('Unauthorized. Please set App ID and App Key first using the form.', 'error'));
     }
+    
+    // Safety trim just in case cookies have spaces
+    app_id = app_id.trim();
+    app_key = app_key.trim();
+
+    console.log(`[Proxy] Requesting: ${endpointUrl}`);
 
     try {
         const response = await axios.get(endpointUrl, {
             headers: {
                 'app_id': app_id,
                 'app_key': app_key,
-                'Accept': 'application/json'
-            }
+                'Accept': 'application/json',
+                // Important: Add User-Agent to mimic a browser, otherwise some APIs block Node.js
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            },
+            timeout: 10000 // 10 second timeout to prevent hanging
         });
+        
+        console.log(`[Proxy] Success. Status: ${response.status}`);
         res.json(response.data);
     } catch (error) {
-        res.status(error.response?.status || 500).json({
-            error: 'Failed to fetch data from DAA API',
-            message: error.message,
-            upstream_response: error.response?.data
-        });
+        console.error('[Proxy] Error:', error.message);
+        
+        if (error.response) {
+            console.error('[Proxy] Upstream Status:', error.response.status);
+            console.error('[Proxy] Upstream Data:', JSON.stringify(error.response.data).substring(0, 200));
+            
+            // Return the upstream error details to the client
+            res.status(error.response.status).json({
+                error: 'Upstream API Error',
+                status: error.response.status,
+                message: error.message,
+                upstream_data: error.response.data
+            });
+        } else if (error.request) {
+            // The request was made but no response was received
+            console.error('[Proxy] No response received');
+            res.status(504).json({ 
+                error: 'Gateway Timeout / Network Error', 
+                message: 'No response received from DAA API. Please try again later.' 
+            });
+        } else {
+            // Something happened in setting up the request
+            res.status(500).json({ 
+                error: 'Internal Server Error', 
+                message: error.message 
+            });
+        }
     }
 };
 
