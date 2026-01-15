@@ -1,7 +1,7 @@
-const express = require('express');
-const axios = require('axios');
-const cookieParser = require('cookie-parser');
-const bodyParser = require('body-parser');
+import express from 'express';
+import axios from 'axios';
+import cookieParser from 'cookie-parser';
+import bodyParser from 'body-parser';
 
 const app = express();
 const port = process.env.PORT || 3000;
