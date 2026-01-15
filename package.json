@@ -1,6 +1,7 @@
 {
   "name": "daa-api-server",
   "version": "1.0.0",
+  "type": "module",
   "description": "Node.js server for DAA API proxy",
   "main": "server.js",
   "scripts": {
