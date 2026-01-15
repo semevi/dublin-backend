@@ -101,7 +101,7 @@ func main() {
 	// Запускаем обновление кэша каждые 5 минут
 	go func() {
 		updateCache()
-		for range time.Tick(5 * time.Minute) {
+		for range time.Tick(1 * time.Minute) {
 			updateCache()
 		}
 	}()
@@ -174,17 +174,23 @@ func testKeys(id, key string) bool {
 	req.Header.Set("app_id", id)
 	req.Header.Set("app_key", key)
 	req.Header.Set("Accept", "application/json")
+
 	resp, err := client.Do(req)
 	if err != nil {
+		log.Println("Ошибка запроса в testKeys:", err)
 		return false
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	log.Printf("testKeys статус: %d | тело: %s", resp.StatusCode, string(body))
+
 	return resp.StatusCode == 200
 }
 
 func fetchDAA(endpoint string) (interface{}, error) {
 	if currentAppId == "" || currentAppKey == "" {
-		return nil, fmt.Errorf("Нет ключей — зайди на /keys и введи")
+		return nil, fmt.Errorf("Нет ключей")
 	}
 	url := "https://api.daa.ie/dub/aops/flightdata/operational/v1" + endpoint
 	req, _ := http.NewRequest("GET", url, nil)
@@ -198,6 +204,14 @@ func fetchDAA(endpoint string) (interface{}, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	log.Printf("fetchDAA статус: %d для %s", resp.StatusCode, endpoint)
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		log.Printf("Ошибка от DAA: %s", string(body))
+		return nil, fmt.Errorf("DAA вернул %d", resp.StatusCode)
+	}
 
 	var result interface{}
 	json.NewDecoder(resp.Body).Decode(&result)
