@@ -194,83 +194,114 @@ async function saveFlightsToDB(flightsArray) {
       const bag = agents.find(a => a.HandlingAgentService === 'BAG')?.HandlingAgentCode || null;
 
       await client.query(`
-        INSERT INTO flights (
-          flight_key, flight_identity, carrier_iata, flight_direction, scheduled_date_utc,
-          scheduled_datetime, estimated_datetime, actual_on_blocks, actual_off_blocks,
-          target_startup_approval, actual_startup_request, actual_startup_approval,
-          estimated_airport_off_block, calculated_take_off, wheels_down, first_bag, last_bag,
-          aircraft_registration, aircraft_type_icao, stand_position, gate_number,
-          baggage_carousel_id, pax_total, flight_status_code, handling_ramp, handling_bag,
-          origin_iata, destination_iata, code_share_status, mod_time, raw_json
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-                $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)
-        ON CONFLICT (flight_key) DO UPDATE SET
-          flight_identity = EXCLUDED.flight_identity,
-          carrier_iata = EXCLUDED.carrier_iata,
-          flight_direction = EXCLUDED.flight_direction,
-          scheduled_date_utc = EXCLUDED.scheduled_date_utc,
-          scheduled_datetime = EXCLUDED.scheduled_datetime,
-          estimated_datetime = EXCLUDED.estimated_datetime,
-          actual_on_blocks = EXCLUDED.actual_on_blocks,
-          actual_off_blocks = EXCLUDED.actual_off_blocks,
-          target_startup_approval = EXCLUDED.target_startup_approval,
-          actual_startup_request = EXCLUDED.actual_startup_request,
-          actual_startup_approval = EXCLUDED.actual_startup_approval,
-          estimated_airport_off_block = EXCLUDED.estimated_airport_off_block,
-          calculated_take_off = EXCLUDED.calculated_take_off,
-          wheels_down = EXCLUDED.wheels_down,
-          first_bag = EXCLUDED.first_bag,
-          last_bag = EXCLUDED.last_bag,
-          aircraft_registration = EXCLUDED.aircraft_registration,
-          aircraft_type_icao = EXCLUDED.aircraft_type_icao,
-          stand_position = EXCLUDED.stand_position,
-          gate_number = EXCLUDED.gate_number,
-          baggage_carousel_id = EXCLUDED.baggage_carousel_id,
-          pax_total = EXCLUDED.pax_total,
-          flight_status_code = EXCLUDED.flight_status_code,
-          handling_ramp = EXCLUDED.handling_ramp,
-          handling_bag = EXCLUDED.handling_bag,
-          origin_iata = EXCLUDED.origin_iata,
-          destination_iata = EXCLUDED.destination_iata,
-          code_share_status = EXCLUDED.code_share_status,
-          mod_time = EXCLUDED.mod_time,
-          raw_json = EXCLUDED.raw_json,
-          updated_at = NOW()
-      `, [
-        fid.FlightKey,
-        fid.FlightIdentity,
-        fid.IATAFlightIdentifier?.CarrierIATACode,
-        fid.FlightDirection,
-        fid.ScheduledDateUTC ? fid.ScheduledDateUTC.split('T')[0] : null,
-        ops.ScheduledDateTime,
-        ops.EstimatedDateTime,
-        ops.ActualOnBlocksDateTime,
-        ops.ActualOffBlocksDateTime,
-        ops.TargetStartupApprovalDateTime,
-        ops.ActualStartUpRequestDateTime,
-        ops.ActualStartUpApprovalDateTime,
-        ops.EstimatedAirportOffBlockDateTime,
-        flight.CDMInfoFields?.CalculatedTakeOffDateTime,
-        ops.WheelsDownDateTime,
-        ops.FirstBagDateTime,
-        ops.LastBagDateTime,
-        fdata.Aircraft?.AircraftRegistration,
-        fdata.Aircraft?.AircraftTypeICAOCode,
-        fdata.Airport?.Stand?.StandPosition,
-        fdata.Airport?.Gate?.GateNumber,
-        fdata.Airport?.BaggageReclaimCarousel?.BaggageReclaimCarouselID,
-        load.TotalPassengerCount,
-        fld.FlightStatusCode,
-        ramp,
-        bag,
-        fld.OriginAirportIATACode,
-        null,  // destination_iata пока null
-        null,
-        fld.CodeShareStatus,
-        flight.ModTime,
-        flight
-      ]);
+  INSERT INTO flights (
+    flight_key, flight_identity, carrier_iata, flight_direction, scheduled_date_utc,
+    scheduled_datetime, estimated_datetime, actual_on_blocks, actual_off_blocks,
+    target_startup_approval, actual_startup_request, actual_startup_approval,
+    estimated_airport_off_block, calculated_take_off, wheels_down, first_bag, last_bag,
+    aircraft_registration, aircraft_type_icao, stand_position, gate_number,
+    baggage_carousel_id, pax_total, flight_status_code, handling_ramp, handling_bag,
+    origin_iata, origin_display, destination_iata, destination_display, code_share_status, mod_time, raw_json
+  )
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+          $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33)
+  ON CONFLICT (flight_key) DO UPDATE SET
+    flight_identity = EXCLUDED.flight_identity,
+    carrier_iata = EXCLUDED.carrier_iata,
+    flight_direction = EXCLUDED.flight_direction,
+    scheduled_date_utc = EXCLUDED.scheduled_date_utc,
+    scheduled_datetime = EXCLUDED.scheduled_datetime,
+    estimated_datetime = EXCLUDED.estimated_datetime,
+    actual_on_blocks = EXCLUDED.actual_on_blocks,
+    actual_off_blocks = EXCLUDED.actual_off_blocks,
+    target_startup_approval = EXCLUDED.target_startup_approval,
+    actual_startup_request = EXCLUDED.actual_startup_request,
+    actual_startup_approval = EXCLUDED.actual_startup_approval,
+    estimated_airport_off_block = EXCLUDED.estimated_airport_off_block,
+    calculated_take_off = EXCLUDED.calculated_take_off,
+    wheels_down = EXCLUDED.wheels_down,
+    first_bag = EXCLUDED.first_bag,
+    last_bag = EXCLUDED.last_bag,
+    aircraft_registration = EXCLUDED.aircraft_registration,
+    aircraft_type_icao = EXCLUDED.aircraft_type_icao,
+    stand_position = EXCLUDED.stand_position,
+    gate_number = EXCLUDED.gate_number,
+    baggage_carousel_id = EXCLUDED.baggage_carousel_id,
+    pax_total = EXCLUDED.pax_total,
+    flight_status_code = EXCLUDED.flight_status_code,
+    handling_ramp = EXCLUDED.handling_ramp,
+    handling_bag = EXCLUDED.handling_bag,
+    origin_iata = EXCLUDED.origin_iata,
+    origin_display = EXCLUDED.origin_display,
+    destination_iata = EXCLUDED.destination_iata,
+    destination_display = EXCLUDED.destination_display,
+    code_share_status = EXCLUDED.code_share_status,
+    mod_time = EXCLUDED.mod_time,
+    raw_json = EXCLUDED.raw_json,
+    updated_at = NOW()
+`, [
+  fid.FlightKey,
+  fid.FlightIdentity,
+  fid.IATAFlightIdentifier?.CarrierIATACode,
+  fid.FlightDirection,
+  fid.ScheduledDateUTC ? fid.ScheduledDateUTC.split('T')[0] : null,
+  ops.ScheduledDateTime,
+  ops.EstimatedDateTime,
+  ops.ActualOnBlocksDateTime,
+  ops.ActualOffBlocksDateTime,
+  ops.TargetStartupApprovalDateTime,
+  ops.ActualStartUpRequestDateTime,
+  ops.ActualStartUpApprovalDateTime,
+  ops.EstimatedAirportOffBlockDateTime,
+  flight.CDMInfoFields?.CalculatedTakeOffDateTime,
+  ops.WheelsDownDateTime,
+  ops.FirstBagDateTime,
+  ops.LastBagDateTime,
+  fdata.Aircraft?.AircraftRegistration,
+  fdata.Aircraft?.AircraftTypeICAOCode,
+  fdata.Airport?.Stand?.StandPosition,
+  fdata.Airport?.Gate?.GateNumber,
+  fdata.Airport?.BaggageReclaimCarousel?.BaggageReclaimCarouselID,
+  load.TotalPassengerCount,
+  fld.FlightStatusCode,
+  ramp,
+  bag,
+  fld.OriginAirportIATACode,
+  fld.OriginAirportDisplay || null,
+  fld.DestinationAirportIATACode,
+  fld.DestinationAirportDisplay || null,
+  fld.CodeShareStatus,
+  flight.ModTime,
+  flight
+]);
+// Вот самое главное — проверка и запись истории стендов
+const newStand = fdata.Airport?.Stand?.StandPosition || null;
+
+// Получаем старый стенд из базы
+const oldStandResult = await client.query(
+  'SELECT stand_position FROM flights WHERE flight_key = $1',
+  [fid.FlightKey]
+);
+const oldStand = oldStandResult.rows[0]?.stand_position || null;
+
+// Если стенд изменился (или рейс новый) — пишем в историю
+if (newStand && newStand !== oldStand) {
+  await client.query(`
+    INSERT INTO stand_history (
+      flight_key, stand_position, assigned_at, source_mod_time, notes
+    )
+    VALUES ($1, $2, NOW(), $3, $4)
+  `, [
+    fid.FlightKey,
+    newStand,
+    flight.ModTime,
+    oldStand 
+      ? `Стенд сменили с ${oldStand} на ${newStand}` 
+      : `Первый стенд назначен: ${newStand}`
+  ]);
+
+  console.log(`Стенд для ${fid.FlightIdentity} изменился: ${oldStand || 'нет'} → ${newStand}`);
+}
     }
 
     await client.query('COMMIT');
@@ -321,7 +352,25 @@ app.get('/updates', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+// Самый простой эндпоинт: отдаём ВЕСЬ свежий JSON от DAA API
+app.get('/api/raw-flights', async (req, res) => {
+  try {
+    // Если кэш пустой — обновляем его (тянем свежие данные из DAA)
+    if (!cache.flightdata) {
+      await updateCache();
+    }
 
+    // Просто отдаём весь JSON, который лежит в кэше
+    if (cache.flightdata) {
+      res.json(cache.flightdata);
+    } else {
+      res.status(503).json({ error: 'Данные ещё не загрузились, подожди 5–10 секунд' });
+    }
+  } catch (err) {
+    console.error('Не смогли отдать сырой JSON:', err.message);
+    res.status(500).json({ error: 'Что-то сломалось на складе' });
+  }
+});
 app.listen(PORT, () => {
   console.log(`Сервер на http://localhost:${PORT}`);
   console.log('Если ключи не работают — зайди на /keys');
