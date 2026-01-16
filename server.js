@@ -266,6 +266,7 @@ async function saveFlightsToDB(flightsArray) {
         bag,
         fld.OriginAirportIATACode,
         null,  // destination_iata пока null
+        null,
         fld.CodeShareStatus,
         flight.ModTime,
         flight
