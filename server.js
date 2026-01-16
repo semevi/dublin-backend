@@ -1,10 +1,10 @@
-// server.js — с формой ввода ключей, если .env не работает
-
+// server.js — полный файл с базой данных и сохранением рейсов
 import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
 import axios from 'axios';
+import { Pool } from 'pg';
 
 dotenv.config();
 
@@ -15,26 +15,39 @@ app.use(morgan('dev'));
 app.use(cors());
 app.use(express.json());
 
-// Текущие ключи — сначала берём из .env
+// Подключение к базе — как открыть дверь склада
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: false  // на Mac обычно не нужен ssl
+});
+
+// Проверяем при запуске, что склад открыт
+pool.query('SELECT NOW() AS now')
+  .then(result => {
+    console.log('Склад открыт! База работает. Время в базе:', result.rows[0].now);
+  })
+  .catch(err => {
+    console.error('Дверь склада не открылась! Ошибка с базой:', err.message);
+  });
+
+// Ключи из .env
 let currentAppId = process.env.APP_ID;
 let currentAppKey = process.env.APP_KEY;
 
-// Кэш данных
+// Кэш — временная корзинка
 let cache = {
   flightdata: null,
   updates: null,
   lastUpdate: 0
 };
 
-// Проверяем ключи при запуске
 console.log('Старт сервера...');
 console.log('Ключи из .env: app_id =', currentAppId ? 'есть' : 'НЕТ', ', app_key =', currentAppKey ? 'есть' : 'НЕТ');
 
-// Проверка, работают ли текущие ключи
+// Проверка ключей
 async function testKeys(id, key) {
   try {
-    const testUrl = 'https://api.daa.ie/dub/aops/flightdata/operational/v1/carrier/EI';
-    await axios.get(testUrl, {
+    await axios.get('https://api.daa.ie/dub/aops/flightdata/operational/v1/carrier/EI', {
       headers: { app_id: id, app_key: key, Accept: 'application/json' },
       timeout: 8000
     });
@@ -44,7 +57,6 @@ async function testKeys(id, key) {
   }
 }
 
-// Если ключи из .env рабочие — сразу их используем
 if (currentAppId && currentAppKey) {
   testKeys(currentAppId, currentAppKey).then(ok => {
     if (ok) console.log('Ключи из .env рабочие — супер!');
@@ -63,7 +75,7 @@ app.get('/', (req, res) => {
   `);
 });
 
-// Форма ввода ключей
+// Форма для ключей
 app.get('/keys', (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -122,7 +134,7 @@ app.get('/keys', (req, res) => {
   `);
 });
 
-// Сохраняем новые ключи и проверяем их
+// Сохраняем новые ключи
 app.post('/save-keys', (req, res) => {
   const { app_id, app_key } = req.body;
 
@@ -133,16 +145,12 @@ app.post('/save-keys', (req, res) => {
   currentAppId = app_id;
   currentAppKey = app_key;
 
-  // Обновляем заголовки
-  DAA_HEADERS.app_id = app_id;
-  DAA_HEADERS.app_key = app_key;
-
   console.log('Новые ключи сохранены:', app_id.substring(0,4) + '...');
 
   res.json({ success: true });
 });
 
-// Функция запроса к DAA
+// Запрос к DAA
 async function fetchDAA(endpoint) {
   if (!currentAppId || !currentAppKey) {
     throw new Error('Нет ключей — зайди на /keys и введи');
@@ -163,22 +171,138 @@ async function fetchDAA(endpoint) {
   return response.data;
 }
 
-// Обновление кэша
+// Грузчик — кладёт рейсы на склад (в таблицу flights)
+async function saveFlightsToDB(flightsArray) {
+  if (!Array.isArray(flightsArray) || flightsArray.length === 0) {
+    console.log('Нет рейсов — полка остаётся пустой');
+    return;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    for (const flight of flightsArray) {
+      const fid = flight.FlightIdentification || {};
+      const fdata = flight.FlightData || {};
+      const fld = flight.Flight || {};
+      const ops = flight.OperationalTimes || {};
+      const load = flight.Load?.PassengerCounts || {};
+      const agents = fld.HandlingAgents || [];
+
+      const ramp = agents.find(a => a.HandlingAgentService === 'RAMP')?.HandlingAgentCode || null;
+      const bag = agents.find(a => a.HandlingAgentService === 'BAG')?.HandlingAgentCode || null;
+
+      await client.query(`
+        INSERT INTO flights (
+          flight_key, flight_identity, carrier_iata, flight_direction, scheduled_date_utc,
+          scheduled_datetime, estimated_datetime, actual_on_blocks, actual_off_blocks,
+          target_startup_approval, actual_startup_request, actual_startup_approval,
+          estimated_airport_off_block, calculated_take_off, wheels_down, first_bag, last_bag,
+          aircraft_registration, aircraft_type_icao, stand_position, gate_number,
+          baggage_carousel_id, pax_total, flight_status_code, handling_ramp, handling_bag,
+          origin_iata, destination_iata, code_share_status, mod_time, raw_json
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+                $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)
+        ON CONFLICT (flight_key) DO UPDATE SET
+          flight_identity = EXCLUDED.flight_identity,
+          carrier_iata = EXCLUDED.carrier_iata,
+          flight_direction = EXCLUDED.flight_direction,
+          scheduled_date_utc = EXCLUDED.scheduled_date_utc,
+          scheduled_datetime = EXCLUDED.scheduled_datetime,
+          estimated_datetime = EXCLUDED.estimated_datetime,
+          actual_on_blocks = EXCLUDED.actual_on_blocks,
+          actual_off_blocks = EXCLUDED.actual_off_blocks,
+          target_startup_approval = EXCLUDED.target_startup_approval,
+          actual_startup_request = EXCLUDED.actual_startup_request,
+          actual_startup_approval = EXCLUDED.actual_startup_approval,
+          estimated_airport_off_block = EXCLUDED.estimated_airport_off_block,
+          calculated_take_off = EXCLUDED.calculated_take_off,
+          wheels_down = EXCLUDED.wheels_down,
+          first_bag = EXCLUDED.first_bag,
+          last_bag = EXCLUDED.last_bag,
+          aircraft_registration = EXCLUDED.aircraft_registration,
+          aircraft_type_icao = EXCLUDED.aircraft_type_icao,
+          stand_position = EXCLUDED.stand_position,
+          gate_number = EXCLUDED.gate_number,
+          baggage_carousel_id = EXCLUDED.baggage_carousel_id,
+          pax_total = EXCLUDED.pax_total,
+          flight_status_code = EXCLUDED.flight_status_code,
+          handling_ramp = EXCLUDED.handling_ramp,
+          handling_bag = EXCLUDED.handling_bag,
+          origin_iata = EXCLUDED.origin_iata,
+          destination_iata = EXCLUDED.destination_iata,
+          code_share_status = EXCLUDED.code_share_status,
+          mod_time = EXCLUDED.mod_time,
+          raw_json = EXCLUDED.raw_json,
+          updated_at = NOW()
+      `, [
+        fid.FlightKey,
+        fid.FlightIdentity,
+        fid.IATAFlightIdentifier?.CarrierIATACode,
+        fid.FlightDirection,
+        fid.ScheduledDateUTC ? fid.ScheduledDateUTC.split('T')[0] : null,
+        ops.ScheduledDateTime,
+        ops.EstimatedDateTime,
+        ops.ActualOnBlocksDateTime,
+        ops.ActualOffBlocksDateTime,
+        ops.TargetStartupApprovalDateTime,
+        ops.ActualStartUpRequestDateTime,
+        ops.ActualStartUpApprovalDateTime,
+        ops.EstimatedAirportOffBlockDateTime,
+        flight.CDMInfoFields?.CalculatedTakeOffDateTime,
+        ops.WheelsDownDateTime,
+        ops.FirstBagDateTime,
+        ops.LastBagDateTime,
+        fdata.Aircraft?.AircraftRegistration,
+        fdata.Aircraft?.AircraftTypeICAOCode,
+        fdata.Airport?.Stand?.StandPosition,
+        fdata.Airport?.Gate?.GateNumber,
+        fdata.Airport?.BaggageReclaimCarousel?.BaggageReclaimCarouselID,
+        load.TotalPassengerCount,
+        fld.FlightStatusCode,
+        ramp,
+        bag,
+        fld.OriginAirportIATACode,
+        null,  // destination_iata пока null
+        fld.CodeShareStatus,
+        flight.ModTime,
+        flight
+      ]);
+    }
+
+    await client.query('COMMIT');
+    console.log(`Сохранили ${flightsArray.length} рейсов на склад!`);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Грузчик уронил чемодан! Ошибка:', err.message);
+  } finally {
+    client.release();
+  }
+}
+
+// Обновление кэша и склада
 async function updateCache() {
   try {
     cache.flightdata = await fetchDAA('/carrier/EI,BA,IB,VY,I2,AA,T2');
     cache.updates = await fetchDAA('/updates/carrier/EI,BA,IB,VY,I2,AA,T2');
+
+    if (cache.flightdata?.Flights && Array.isArray(cache.flightdata.Flights)) {
+      await saveFlightsToDB(cache.flightdata.Flights);
+    }
+
     cache.lastUpdate = Date.now();
-    console.log('Кэш обновлён');
+    console.log('Кэш и склад обновлены');
   } catch (e) {
-    console.error('Ошибка кэша:', e.message);
+    console.error('Ошибка при обновлении:', e.message);
   }
 }
 
 setInterval(updateCache, 5 * 60 * 1000);
 updateCache(); // первый запуск
 
-// Рейсы и обновления
+// Показ рейсов и обновлений
 app.get('/flightdata', async (req, res) => {
   try {
     if (!cache.flightdata) await updateCache();
