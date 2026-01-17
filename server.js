@@ -217,23 +217,21 @@ async function updateCache() {
   }
 }
 
-// Initial fetch + periodic updates (every 5 minutes)
-updateCache();
-setInterval(updateCache, 5 * 60 * 1000);
+// Create API router mounted under /server
+const apiRouter = express.Router();
 
-// Public API endpoints
-app.get('/api/raw-flights', async (req, res) => {
+// API endpoints under /server
+apiRouter.get('/api/raw-flights', async (req, res) => {
   if (!cache.flightdata) await updateCache();
   res.json(cache.flightdata || { Flights: [] });
 });
 
-app.get('/api/updates', async (req, res) => {
+apiRouter.get('/api/updates', async (req, res) => {
   if (!cache.updates) await updateCache();
   res.json(cache.updates || {});
 });
 
-// Health check endpoint
-app.get('/health', (req, res) => {
+apiRouter.get('/health', (req, res) => {
   res.json({
     status: 'OK',
     lastUpdate: new Date(cache.lastUpdate).toISOString(),
@@ -241,15 +239,17 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Root redirect to health
+// Mount the router at /server prefix
+app.use('/server', apiRouter);
+
+// Root redirect to health (optional, for debugging)
 app.get('/', (req, res) => {
-  res.redirect('/health');
+  res.redirect('/server/health');
 });
 
+// Start the server
 app.listen(PORT, () => {
   console.log(`Ground Operations Backend running on port ${PORT}`);
-  console.log(`Health check:    http://localhost:${PORT}/health`);
-  console.log(`Public API:      http://localhost:${PORT}/api/raw-flights`);
-  console.log(`In production:   https://aerfoirt.net/server/health`);
-  console.log(`In production:   https://aerfoirt.net/server/api/raw-flights`);
+  console.log(`Health check:    https://aerfoirt.net/server/health`);
+  console.log(`Public API:      https://aerfoirt.net/server/api/raw-flights`);
 });
