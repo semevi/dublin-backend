@@ -65,7 +65,7 @@ if (currentAppId && currentAppKey) {
 }
 
 // Главная страница
-app.get('/', (req, res) => {
+app.get('/server', (req, res) => {
   const status = currentAppId && currentAppKey ? 'Ключи есть' : 'Ключи НЕТ — зайди на /keys';
   res.send(`
     <h1>GOPS бэкенд ✈️</h1>
@@ -372,6 +372,6 @@ app.get('/api/raw-flights', async (req, res) => {
   }
 });
 app.listen(PORT, () => {
-  console.log(`Сервер на http://localhost:${PORT}`);
+  console.log(`Сервер на http://localhost/server:${PORT}`);
   console.log('Если ключи не работают — зайди на /keys');
 });
