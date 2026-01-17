@@ -1,4 +1,3 @@
 {
-  "DEPLOYPATH": "/home/aerfoirt/server",
-  "task": ["server.js"]
+  "DEPLOYPATH": "/home/aerfoirt/server"
 }
