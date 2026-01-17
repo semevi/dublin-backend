@@ -1,9 +1,40 @@
 {
   "DEPLOYPATH": "/home/aerfoirt/server",
+  "pre_deploy": [
+    {
+      "action": "cmd",
+      "command": "echo '🚀 Начинаем деплой Node.js приложения...'",
+      "cwd": "/home/aerfoirt/server"
+    }
+  ],
   "task": [
-    "server.js",
-    "package.json",
-    "public/",
-    "views/"
+    {
+      "action": "sync",
+      "source": ".",
+      "destination": "/home/aerfoirt/server",
+      "exclude": [".git", "node_modules", ".env", "*.log"]
+    }
+  ],
+  "post_deploy": [
+    {
+      "action": "cmd",
+      "command": "cd /home/aerfoirt/server && npm install --only=production",
+      "cwd": "/home/aerfoirt/server"
+    },
+    {
+      "action": "cmd",
+      "command": "cd /home/aerfoirt/server && pm2 delete server 2>/dev/null || true",
+      "cwd": "/home/aerfoirt/server"
+    },
+    {
+      "action": "cmd",
+      "command": "cd /home/aerfoirt/server && pm2 start server.js --name server",
+      "cwd": "/home/aerfoirt/server"
+    },
+    {
+      "action": "cmd",
+      "command": "echo '✅ Деплой успешно завершен!'",
+      "cwd": "/home/aerfoirt/server"
+    }
   ]
 }
