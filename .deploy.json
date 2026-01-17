@@ -1,0 +1,9 @@
+{
+  "DEPLOYPATH": "/home/aerfoirt/server",
+  "task": [
+    "server.js",
+    "package.json",
+    "public/",
+    "views/"
+  ]
+}
