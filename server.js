@@ -9,7 +9,7 @@ import { Pool } from 'pg';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 30000;
+const PORT = process.env.PORT || 3000;
 
 app.use(morgan('dev'));
 app.use(cors());
@@ -65,7 +65,7 @@ if (currentAppId && currentAppKey) {
 }
 
 // Главная страница
-app.get('/server', (req, res) => {
+app.get('/', (req, res) => {
   const status = currentAppId && currentAppKey ? 'Ключи есть' : 'Ключи НЕТ — зайди на /keys';
   res.send(`
     <h1>GOPS бэкенд ✈️</h1>
@@ -372,6 +372,6 @@ app.get('/api/raw-flights', async (req, res) => {
   }
 });
 app.listen(PORT, () => {
-  console.log(`Сервер на http://localhost/server:${PORT}`);
+  console.log(`Сервер на http://localhost:${PORT}`);
   console.log('Если ключи не работают — зайди на /keys');
 });
