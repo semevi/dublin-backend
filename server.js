@@ -26,7 +26,72 @@ pool.query('SELECT NOW()').then(res => {
 }).catch(err => {
   console.error('Database connection failed:', err.message);
 });
+// Initialize database schema if tables do not exist
+async function initDatabaseSchema() {
+  const client = await pool.connect();
+  try {
+    // Create flights table if not exists
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS flights (
+        flight_key VARCHAR(100) PRIMARY KEY,
+        flight_identity VARCHAR(50),
+        carrier_iata CHAR(2),
+        flight_direction CHAR(1),
+        scheduled_date_utc DATE,
+        scheduled_datetime TIMESTAMP,
+        estimated_datetime TIMESTAMP,
+        actual_on_blocks TIMESTAMP,
+        actual_off_blocks TIMESTAMP,
+        target_startup_approval TIMESTAMP,
+        actual_startup_request TIMESTAMP,
+        actual_startup_approval TIMESTAMP,
+        estimated_airport_off_block TIMESTAMP,
+        calculated_take_off TIMESTAMP,
+        wheels_down TIMESTAMP,
+        first_bag TIMESTAMP,
+        last_bag TIMESTAMP,
+        aircraft_registration VARCHAR(20),
+        aircraft_type_icao CHAR(4),
+        stand_position VARCHAR(20),
+        gate_number VARCHAR(20),
+        baggage_carousel_id VARCHAR(20),
+        pax_total INTEGER,
+        flight_status_code VARCHAR(10),
+        handling_ramp VARCHAR(10),
+        handling_bag VARCHAR(10),
+        origin_iata CHAR(3),
+        origin_display VARCHAR(100),
+        destination_iata CHAR(3),
+        destination_display VARCHAR(100),
+        code_share_status VARCHAR(20),
+        mod_time TIMESTAMP,
+        raw_json JSONB,
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
 
+    // Create stand_history table if not exists
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS stand_history (
+        id SERIAL PRIMARY KEY,
+        flight_key VARCHAR(100) REFERENCES flights(flight_key),
+        stand_position VARCHAR(20),
+        assigned_at TIMESTAMP DEFAULT NOW(),
+        source_mod_time TIMESTAMP,
+        notes TEXT
+      );
+    `);
+
+    console.log('Database schema initialized: tables flights and stand_history created or already exist');
+  } catch (err) {
+    console.error('Failed to initialize database schema:', err.message);
+  } finally {
+    client.release();
+  }
+}
+
+// Call schema initialization once on startup
+initDatabaseSchema();
 // Permanent DAA API credentials from .env
 const APP_ID = process.env.APP_ID;
 const APP_KEY = process.env.APP_KEY;
